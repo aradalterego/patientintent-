@@ -91,8 +91,8 @@ const REGIONS = [
   { key: "neck", label: "Neck", bilateral: false, zones: ["neck", "platysma"], neck: true },
 ];
 const EXTERNAL = [
-  { key: "temples", label: "Temples", bilateral: true, zones: ["temples"], anchor: { right: 54, left: 284 } },
-  { key: "crows_feet", label: "Crow's feet", bilateral: true, zones: ["lateral_canthal"], anchor: { right: 130, left: 359 } },
+  { key: "temples", label: "Temples", bilateral: true, zones: ["temples"], anchor: { right: 71, left: 301 } },
+  { key: "crows_feet", label: "Crow's feet", bilateral: true, zones: ["lateral_canthal"], anchor: { right: 143, left: 372 } },
 ];
 const SIDE_LABELS = { both: "Both sides", right: "Right", left: "Left" };
 const ALL = [...REGIONS, ...EXTERNAL];
@@ -106,6 +106,19 @@ const STATE_TO_REGIONS = Object.fromEntries(
 );
 
 const toPath = (pts) => pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+/* rounded closed path through the points (keeps anchors, softens edges) */
+function smoothPath(pts, t = 0.9) {
+  const n = pts.length;
+  if (n < 3) return "M " + toPath(pts) + " Z";
+  let d = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)} `;
+  for (let i = 0; i < n; i++) {
+    const p0 = pts[(i - 1 + n) % n], p1 = pts[i], p2 = pts[(i + 1) % n], p3 = pts[(i + 2) % n];
+    const c1x = p1.x + ((p2.x - p0.x) / 6) * t, c1y = p1.y + ((p2.y - p0.y) / 6) * t;
+    const c2x = p2.x - ((p3.x - p1.x) / 6) * t, c2y = p2.y - ((p3.y - p1.y) / 6) * t;
+    d += `C ${c1x.toFixed(1)} ${c1y.toFixed(1)} ${c2x.toFixed(1)} ${c2y.toFixed(1)} ${p2.x.toFixed(1)} ${p2.y.toFixed(1)} `;
+  }
+  return d + "Z";
+}
 const polyPts = (idx, lm, w, h) => idx.map((i) => lm[i]).filter(Boolean).map((p) => ({ x: p.x * w, y: p.y * h }));
 function convexHull(points) {
   if (points.length < 3) return points;
@@ -496,7 +509,7 @@ export default function FaceAreaSelector() {
                       const rating = mode === "area" && sel ? ratingOf(pg.region, pg.side) : 0;
                       return (
                         <g key={pg.region + pg.side}>
-                          <polygon className={"poly" + (sel ? " selected" : "") + (mode === "area" ? "" : " ro")} points={toPath(pg.pts)} onClick={mode === "area" ? () => onAreaClick(pg.region, pg.side) : undefined} />
+                          <path className={"poly" + (sel ? " selected" : "") + (mode === "area" ? "" : " ro")} d={smoothPath(pg.pts)} onClick={mode === "area" ? () => onAreaClick(pg.region, pg.side) : undefined} />
                           {mode === "area" && sel && rating > 0 && (
                             <>
                               <circle className="poly-badge" cx={cx} cy={cy} r={fs * 0.018} />
