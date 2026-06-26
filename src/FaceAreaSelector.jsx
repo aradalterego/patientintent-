@@ -3,50 +3,51 @@ import { FaceLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
 
 /* ============================================================
    Concilium — Patient Intent capture (Agent 6 front-end)
-   ------------------------------------------------------------
-   רץ על תמונת frontal_neutral. MediaPipe Face Landmarker מחזיר
-   468 נקודות; כל אזור תפיסתי מורכב מ-convex hull של קבוצת אינדקסים.
-   המיפוי region -> zones מתורגם בבקאנד. שכבת המצבים (zone -> state)
-   מבודדת מהפייפליין האבחוני ומצטרפת רק ב-JOIN Final.
+   Frontal_neutral photo + MediaPipe Face Landmarker (468 pts).
+   Each perceptual region is an ORDERED polygon of canonical
+   indices (calibrated on a real face). Neck has no landmarks of
+   its own — it is projected below the jaw line. region->zones is
+   translated in the backend; the perceived-state layer (zone->
+   state) is isolated and only joins at JOIN Final.
 
-   ⚙️ כיול: כל קבוצות האינדקסים מרוכזות ב-HULLS למטה. אם פוליגון
-   יושב לא מדויק על פנים אמיתיות — הפעילו "נקודות עזר" (debug)
-   כדי לראות מספרי landmarks, והחליפו אינדקס בקבוצה הרלוונטית.
+   Calibration: all index lists live in POLY / BAND below. Toggle
+   "Calibration points" to see the 468 numbered landmarks.
    ============================================================ */
 
 const MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
-const WASM_URL =
-  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
+const WASM_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
 
-/* convex-hull index groups (MediaPipe canonical 468 map) */
-const HULLS = {
-  forehead: [103, 67, 109, 10, 338, 297, 332, 334, 296, 9, 66, 105],
-  glabella: [107, 9, 336, 285, 8, 55],
-  brow_left: [70, 63, 105, 66, 107, 55, 65, 52, 53, 46],
-  brow_right: [300, 293, 334, 296, 336, 285, 295, 282, 283, 276],
-  upperlid_left: [33, 246, 161, 160, 159, 158, 157, 173, 133],
-  upperlid_right: [263, 466, 388, 387, 386, 385, 384, 398, 362],
-  undereye_left: [226, 31, 228, 229, 230, 231, 232, 233, 244, 133, 33],
-  undereye_right: [446, 261, 448, 449, 450, 451, 452, 453, 464, 362, 263],
-  temple_left: [21, 54, 103, 104, 68, 71],
-  temple_right: [251, 284, 332, 333, 298, 301],
-  cheek_left: [116, 117, 118, 119, 120, 100, 142, 36, 205, 187, 123, 50],
-  cheek_right: [345, 346, 347, 348, 349, 329, 371, 266, 425, 411, 352, 280],
-  nasolabial_left: [129, 209, 49, 48, 64, 98, 60, 165, 92, 186, 57, 206],
-  nasolabial_right: [358, 429, 279, 278, 294, 327, 290, 391, 322, 410, 287, 426],
-  nose: [168, 6, 197, 195, 5, 4, 1, 19, 94, 2, 98, 97, 326, 327, 48, 278],
+const POLY = {
+  forehead: [103, 67, 109, 10, 338, 297, 332, 334, 296, 9, 107, 66, 105],
+  glabella: [9, 107, 55, 8, 285, 336],
+  nose: [122, 48, 64, 98, 2, 326, 294, 278, 351],
+  upper_lip: [97, 167, 165, 40, 0, 270, 391, 393, 326, 2],
   lips: [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 409, 270, 269, 267, 0, 37, 39, 40, 185],
-  mouth_left: [61, 91, 146, 57, 43, 106, 182, 83, 84, 181],
-  mouth_right: [291, 321, 375, 287, 273, 335, 406, 313, 314, 405],
-  jaw_left: [132, 58, 172, 136, 150, 149, 176, 148, 152, 175],
-  jaw_right: [361, 288, 397, 365, 379, 378, 400, 377, 152, 175],
-  chin: [152, 175, 199, 200, 18, 83, 313, 406, 182, 421, 201],
-  crowsfeet_left: [33, 130, 226, 247, 30, 29, 27, 28, 56, 190],
-  crowsfeet_right: [263, 359, 446, 467, 260, 259, 257, 258, 286, 414],
+  chin: [182, 83, 18, 313, 406, 377, 152, 148, 176],
+  brow_R: [70, 63, 105, 66, 107, 55, 65, 52, 53, 46],
+  brow_L: [336, 296, 334, 293, 300, 276, 283, 282, 295, 285],
+  upperlid_R: [33, 246, 161, 160, 159, 158, 157, 173, 133, 56, 28, 27, 29, 30, 247],
+  upperlid_L: [263, 466, 388, 387, 386, 385, 384, 398, 362, 286, 258, 257, 259, 260, 467],
+  undereye_R: [33, 7, 163, 144, 145, 153, 154, 155, 133, 244, 233, 232, 231, 230, 229, 228, 31, 226],
+  undereye_L: [263, 249, 390, 373, 374, 380, 381, 382, 362, 464, 453, 452, 451, 450, 449, 448, 261, 446],
+  nasolabial_R: [129, 165, 92, 57, 206, 209],
+  nasolabial_L: [358, 391, 322, 287, 426, 429],
+  mouth_R: [61, 91, 181, 84, 83, 182, 106, 43, 57],
+  mouth_L: [291, 321, 405, 314, 313, 406, 335, 273, 287],
 };
+const BAND = {
+  jaw_R: [58, 172, 136, 150, 149, 176, 148, 152],
+  jaw_L: [152, 377, 400, 378, 379, 365, 397, 288],
+};
+/* convex regions (clean blob) */
+const HULL = {
+  cheek_R: [116, 117, 118, 119, 120, 205, 50, 123, 187, 142],
+  cheek_L: [345, 346, 347, 348, 349, 425, 280, 352, 411, 371],
+};
+/* jaw-bottom line used to project the neck region downward */
+const NECK_TOP = [132, 172, 136, 150, 149, 176, 148, 152, 377, 400, 378, 379, 365, 397, 361];
 
-/* zone -> perceived states (reverse of the approved state→zone table) */
 const ZONE_STATES = {
   forehead: ["stressed"],
   glabella: ["angry", "stressed"],
@@ -62,85 +63,77 @@ const ZONE_STATES = {
   oral_commissures: ["sad", "angry", "aged", "heavy"],
   jawline: ["aged", "heavy"],
   mandibular_border: ["aged", "heavy"],
-  // אזורים שנוספו מחוץ לטבלת המצבים — אין תיוג מצב:
   nose: [],
   lateral_canthal: [],
   chin: [],
+  neck: [],
+  platysma: [],
 };
-
 const STATE_LABELS = {
-  tired: "עייפה",
-  sad: "עצובה",
-  angry: "כועסת / קשוחה",
-  aged: "מבוגרת",
-  heavy: "כבדה / שמוטה",
-  gaunt: "חלולה / רזה",
-  stressed: "מתוחה / מודאגת",
-  dull: "עור עמום",
+  tired: "Tired", sad: "Sad", angry: "Angry / stern", aged: "Older",
+  heavy: "Heavy / sagging", gaunt: "Gaunt / hollow", stressed: "Tense / worried", dull: "Dull skin",
 };
 
-/* perceptual regions shown to the patient */
 const REGIONS = [
-  { key: "forehead", label: "מצח", bilateral: false, zones: ["forehead"], hulls: ["forehead"] },
-  { key: "glabella", label: "בין הגבות", bilateral: false, zones: ["glabella"], hulls: ["glabella"] },
-  { key: "brows", label: "גבות", bilateral: true, zones: ["brow_complex"], hulls: ["brow_left", "brow_right"] },
-  { key: "upper_lids", label: "עפעפיים עליונים", bilateral: true, zones: ["upper_eyelid"], hulls: ["upperlid_left", "upperlid_right"] },
-  { key: "under_eye", label: "מתחת לעיניים", bilateral: true, zones: ["tear_trough", "lower_eyelid"], hulls: ["undereye_left", "undereye_right"] },
-  { key: "temples", label: "רקות", bilateral: true, zones: ["temples"], hulls: ["temple_left", "temple_right"] },
-  { key: "cheeks", label: "לחיים", bilateral: true, zones: ["malar_zygomatic", "buccal_submalar"], hulls: ["cheek_left", "cheek_right"] },
-  { key: "nasolabial", label: "קפלי אף-שפה", bilateral: true, zones: ["nasolabial"], hulls: ["nasolabial_left", "nasolabial_right"] },
-  { key: "crows_feet", label: "קמטי צחוק", bilateral: true, zones: ["lateral_canthal"], hulls: ["crowsfeet_left", "crowsfeet_right"] },
-  { key: "nose", label: "אף", bilateral: false, zones: ["nose"], hulls: ["nose"] },
-  { key: "lips", label: "שפתיים", bilateral: false, zones: ["lips"], hulls: ["lips"] },
-  { key: "mouth_corners", label: "זוויות הפה", bilateral: true, zones: ["oral_commissures"], hulls: ["mouth_left", "mouth_right"] },
-  { key: "jawline", label: "קו הלסת", bilateral: true, zones: ["jawline", "mandibular_border"], hulls: ["jaw_left", "jaw_right"] },
-  { key: "chin", label: "סנטר", bilateral: false, zones: ["chin"], hulls: ["chin"] },
+  { key: "forehead", label: "Forehead", bilateral: false, zones: ["forehead"], poly: ["forehead"] },
+  { key: "glabella", label: "Between brows", bilateral: false, zones: ["glabella"], poly: ["glabella"] },
+  { key: "brows", label: "Brows", bilateral: true, zones: ["brow_complex"], poly: ["brow_R", "brow_L"] },
+  { key: "upper_lids", label: "Upper eyelids", bilateral: true, zones: ["upper_eyelid"], poly: ["upperlid_R", "upperlid_L"] },
+  { key: "under_eye", label: "Under-eye", bilateral: true, zones: ["tear_trough", "lower_eyelid"], poly: ["undereye_R", "undereye_L"] },
+  { key: "cheeks", label: "Cheeks", bilateral: true, zones: ["malar_zygomatic", "buccal_submalar"], hull: ["cheek_R", "cheek_L"] },
+  { key: "nose", label: "Nose", bilateral: false, zones: ["nose"], poly: ["nose"] },
+  { key: "nasolabial", label: "Nasolabial folds", bilateral: true, zones: ["nasolabial"], poly: ["nasolabial_R", "nasolabial_L"] },
+  { key: "upper_lip", label: "Upper lip", bilateral: false, zones: ["lips"], poly: ["upper_lip"] },
+  { key: "lips", label: "Lips", bilateral: false, zones: ["lips"], poly: ["lips"] },
+  { key: "mouth_corners", label: "Mouth corners", bilateral: true, zones: ["oral_commissures"], poly: ["mouth_R", "mouth_L"] },
+  { key: "jawline", label: "Jawline", bilateral: true, zones: ["jawline", "mandibular_border"], band: ["jaw_R", "jaw_L"] },
+  { key: "chin", label: "Chin", bilateral: false, zones: ["chin"], poly: ["chin"] },
+  { key: "neck", label: "Neck", bilateral: false, zones: ["neck", "platysma"], neck: true },
 ];
+const EXTERNAL = [
+  { key: "temples", label: "Temples", bilateral: true, zones: ["temples"], anchor: { right: 54, left: 284 } },
+  { key: "crows_feet", label: "Crow's feet", bilateral: true, zones: ["lateral_canthal"], anchor: { right: 130, left: 359 } },
+];
+const SIDE_LABELS = { both: "Both sides", right: "Right", left: "Left" };
+const ALL = [...REGIONS, ...EXTERNAL];
+const regionByKey = Object.fromEntries(ALL.map((r) => [r.key, r]));
 
-// ב-frontal, צד שמאל של התמונה = צד ימין של המטופלת. hull index 0 = image-left
-// = patient right. התוויות אנטומיות (של המטופלת); אם מתהפך על פנים אמיתיות — החליפו כאן.
-const SIDE_LABELS = { both: "שני הצדדים", right: "ימין", left: "שמאל" };
+/* emotional states, ordered for display */
+const ALL_STATES = ["tired", "sad", "angry", "aged", "heavy", "gaunt", "stressed", "dull"];
+/* state -> perceptual regions, derived from ZONE_STATES (single source of truth) */
+const STATE_TO_REGIONS = Object.fromEntries(
+  ALL_STATES.map((st) => [st, ALL.filter((r) => (r.zones || []).some((z) => (ZONE_STATES[z] || []).includes(st))).map((r) => r.key)])
+);
 
-/* ---------- geometry helpers ---------- */
+const toPath = (pts) => pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+const polyPts = (idx, lm, w, h) => idx.map((i) => lm[i]).filter(Boolean).map((p) => ({ x: p.x * w, y: p.y * h }));
 function convexHull(points) {
   if (points.length < 3) return points;
   const pts = points.slice().sort((a, b) => (a.x === b.x ? a.y - b.y : a.x - b.x));
   const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
-  const lower = [];
-  for (const p of pts) {
-    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
-    lower.push(p);
-  }
-  const upper = [];
-  for (let i = pts.length - 1; i >= 0; i--) {
-    const p = pts[i];
-    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
-    upper.push(p);
-  }
-  return lower.slice(0, -1).concat(upper.slice(0, -1));
+  const lo = [], hi = [];
+  for (const p of pts) { while (lo.length >= 2 && cross(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
+  for (let i = pts.length - 1; i >= 0; i--) { const p = pts[i]; while (hi.length >= 2 && cross(hi[hi.length - 2], hi[hi.length - 1], p) <= 0) hi.pop(); hi.push(p); }
+  return lo.slice(0, -1).concat(hi.slice(0, -1));
 }
-
-function padHull(hull, factor = 1.08) {
-  if (!hull.length) return hull;
-  const cx = hull.reduce((s, p) => s + p.x, 0) / hull.length;
-  const cy = hull.reduce((s, p) => s + p.y, 0) / hull.length;
-  return hull.map((p) => ({ x: cx + (p.x - cx) * factor, y: cy + (p.y - cy) * factor }));
+const hullPts = (idx, lm, w, h) => convexHull(polyPts(idx, lm, w, h));
+function bandPts(idx, lm, w, h, cx, cy, inset = 0.14) {
+  const line = polyPts(idx, lm, w, h);
+  const inner = [...line].reverse().map((p) => ({ x: p.x + (cx - p.x) * inset, y: p.y + (cy - p.y) * inset }));
+  return line.concat(inner);
 }
-
-function hullToPoints(indices, landmarks, w, h) {
-  const pts = indices.map((i) => landmarks[i]).filter(Boolean).map((p) => ({ x: p.x * w, y: p.y * h }));
-  return padHull(convexHull(pts));
+function neckPts(lm, w, h, faceH) {
+  const line = polyPts(NECK_TOP, lm, w, h);
+  if (!line.length) return [];
+  const midX = (lm[152]?.x || 0.5) * w;
+  const dy = faceH * 0.20;
+  const bottom = [...line].reverse().map((p) => ({ x: p.x + (midX - p.x) * 0.22, y: p.y + dy }));
+  return line.concat(bottom);
 }
-
 function centroid(pts) {
-  const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
-  const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
-  return { cx, cy };
+  return { cx: pts.reduce((s, p) => s + p.x, 0) / pts.length, cy: pts.reduce((s, p) => s + p.y, 0) / pts.length };
 }
 
-const toPath = (pts) => pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
-
-/* ---------- component ---------- */
 export default function FaceAreaSelector() {
   const [landmarker, setLandmarker] = useState(null);
   const [loadingModel, setLoadingModel] = useState(true);
@@ -152,15 +145,20 @@ export default function FaceAreaSelector() {
   const [detecting, setDetecting] = useState(false);
   const [detectError, setDetectError] = useState(null);
 
-  const [selections, setSelections] = useState({}); // regionKey -> data
+  const [selections, setSelections] = useState({});
   const [activeKey, setActiveKey] = useState(null);
   const [activeSide, setActiveSide] = useState("both");
   const [debug, setDebug] = useState(false);
+  const [view, setView] = useState({ z: 1, x: 0, y: 0 });
+  const [mode, setMode] = useState("area"); // "area" | "state"
+  const [selectedStates, setSelectedStates] = useState([]);
 
   const imgRef = useRef(null);
   const fileRef = useRef(null);
+  const stageRef = useRef(null);
+  const pointers = useRef(new Map());
+  const gesture = useRef({ moved: false, sx: 0, sy: 0, ox: 0, oy: 0, startDist: 0, startView: null, startCenter: null });
 
-  /* load MediaPipe model once */
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -168,8 +166,7 @@ export default function FaceAreaSelector() {
         const fileset = await FilesetResolver.forVisionTasks(WASM_URL);
         const lm = await FaceLandmarker.createFromOptions(fileset, {
           baseOptions: { modelAssetPath: MODEL_URL, delegate: "GPU" },
-          runningMode: "IMAGE",
-          numFaces: 1,
+          runningMode: "IMAGE", numFaces: 1,
         });
         if (!cancelled) { setLandmarker(lm); setLoadingModel(false); }
       } catch (e) {
@@ -179,84 +176,128 @@ export default function FaceAreaSelector() {
     return () => { cancelled = true; };
   }, []);
 
+  /* non-passive wheel zoom */
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const onWheel = (e) => {
+      if (!landmarks) return;
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      zoomAt(e.clientX - rect.left, e.clientY - rect.top, e.deltaY < 0 ? 1.12 : 1 / 1.12);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [landmarks]);
+
   const onFile = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setSelections({}); setActiveKey(null); setLandmarks(null); setDetectError(null);
-    const url = URL.createObjectURL(file);
-    setImgSrc(url);
+    setSelections({}); setActiveKey(null); setLandmarks(null); setDetectError(null); setView({ z: 1, x: 0, y: 0 }); setSelectedStates([]);
+    setImgSrc(URL.createObjectURL(file));
   };
-
   const onImgLoad = useCallback(() => {
     const el = imgRef.current;
     if (!el || !landmarker) return;
     setImgDims({ w: el.naturalWidth, h: el.naturalHeight });
-    setDetecting(true);
-    setDetectError(null);
+    setDetecting(true); setDetectError(null);
     try {
       const res = landmarker.detect(el);
       if (res?.faceLandmarks?.length) setLandmarks(res.faceLandmarks[0]);
-      else setDetectError("לא זוהו פנים בתמונה. נסו תמונת חזית ברורה ומוארת.");
-    } catch (e) {
-      setDetectError("הזיהוי נכשל: " + (e?.message || ""));
-    } finally {
-      setDetecting(false);
-    }
+      else setDetectError("No face detected. Use a clear, well-lit, front-facing photo.");
+    } catch (e) { setDetectError("Detection failed: " + (e?.message || "")); }
+    finally { setDetecting(false); }
   }, [landmarker]);
 
-  /* build polygons for every region/side */
+  const faceGeom = useMemo(() => {
+    if (!landmarks) return { cx: 0, cy: 0, h: 0 };
+    const { w, h } = imgDims;
+    const cx = landmarks.reduce((s, p) => s + p.x, 0) / landmarks.length * w;
+    const cy = landmarks.reduce((s, p) => s + p.y, 0) / landmarks.length * h;
+    const ys = landmarks.map((p) => p.y * h);
+    return { cx, cy, h: Math.max(...ys) - Math.min(...ys) };
+  }, [landmarks, imgDims]);
+
   const polygons = useMemo(() => {
     if (!landmarks) return [];
     const { w, h } = imgDims;
     const out = [];
     for (const r of REGIONS) {
+      if (r.neck) {
+        const pts = neckPts(landmarks, w, h, faceGeom.h);
+        if (pts.length >= 3) out.push({ region: r.key, side: "both", pts });
+        continue;
+      }
+      const keys = r.poly || r.band || r.hull;
+      const isBand = !!r.band, isHull = !!r.hull;
       if (r.bilateral) {
-        // hulls order: [image-left hull, image-right hull].
-        // image-left = patient right; image-right = patient left.
-        r.hulls.forEach((hullKey, i) => {
-          const pts = hullToPoints(HULLS[hullKey], landmarks, w, h);
+        keys.forEach((k, i) => {
+          const pts = isBand ? bandPts(BAND[k], landmarks, w, h, faceGeom.cx, faceGeom.cy)
+            : isHull ? hullPts(HULL[k], landmarks, w, h)
+            : polyPts(POLY[k], landmarks, w, h);
           if (pts.length >= 3) out.push({ region: r.key, side: i === 0 ? "right" : "left", pts });
         });
       } else {
-        const pts = hullToPoints(HULLS[r.hulls[0]], landmarks, w, h);
+        const pts = polyPts(POLY[keys[0]], landmarks, w, h);
         if (pts.length >= 3) out.push({ region: r.key, side: "both", pts });
+      }
+    }
+    return out;
+  }, [landmarks, imgDims, faceGeom]);
+
+  const externals = useMemo(() => {
+    if (!landmarks) return [];
+    const { w, h } = imgDims;
+    const margin = w * 0.04;
+    const out = [];
+    for (const r of EXTERNAL) {
+      for (const side of ["right", "left"]) {
+        const a = landmarks[r.anchor[side]];
+        if (!a) continue;
+        const ap = { x: a.x * w, y: a.y * h };
+        const onLeft = side === "right";
+        out.push({ region: r.key, side, ap, chip: { x: onLeft ? margin : w - margin, y: ap.y }, onLeft });
       }
     }
     return out;
   }, [landmarks, imgDims]);
 
-  const regionByKey = useMemo(() => Object.fromEntries(REGIONS.map((r) => [r.key, r])), []);
+  const stateRegions = useMemo(() => {
+    const set = new Set();
+    selectedStates.forEach((st) => (STATE_TO_REGIONS[st] || []).forEach((k) => set.add(k)));
+    return set;
+  }, [selectedStates]);
+  const toggleSelState = (st) => setSelectedStates((prev) => (prev.includes(st) ? prev.filter((x) => x !== st) : [...prev, st]));
 
-  const statesForRegion = useCallback((regionKey) => {
+    const statesForRegion = useCallback((regionKey) => {
     const r = regionByKey[regionKey];
     if (!r) return [];
     const set = new Set();
     r.zones.forEach((z) => (ZONE_STATES[z] || []).forEach((s) => set.add(s)));
     return [...set];
-  }, [regionByKey]);
+  }, []);
 
-  /* ensure a selection entry exists */
-  function ensureEntry(prev, regionKey) {
-    if (prev[regionKey]) return prev[regionKey];
-    const r = regionByKey[regionKey];
-    return { split: false, both: blankSide(), left: blankSide(), right: blankSide(), bilateral: r.bilateral };
-  }
   const blankSide = () => ({ rating: 0, states: [], note: "" });
-
-  const selectRegion = (regionKey, side) => {
-    setSelections((prev) => {
-      const entry = { ...ensureEntry(prev, regionKey) };
-      return { ...prev, [regionKey]: entry };
-    });
-    setActiveKey(regionKey);
-    const r = regionByKey[regionKey];
-    setActiveSide(r.bilateral && selections[regionKey]?.split ? side : "both");
+  function ensureEntry(prev, key) {
+    if (prev[key]) return prev[key];
+    return { split: false, both: blankSide(), left: blankSide(), right: blankSide(), bilateral: regionByKey[key].bilateral };
+  }
+  const selectRegion = (key, side) => {
+    setSelections((prev) => ({ ...prev, [key]: { ...ensureEntry(prev, key) } }));
+    setActiveKey(key);
+    setActiveSide(regionByKey[key].bilateral && selections[key]?.split ? side : "both");
   };
-
-  const removeRegion = (regionKey) => {
-    setSelections((prev) => { const n = { ...prev }; delete n[regionKey]; return n; });
-    if (activeKey === regionKey) setActiveKey(null);
+  const removeRegion = (key) => {
+    setSelections((prev) => { const n = { ...prev }; delete n[key]; return n; });
+    if (activeKey === key) setActiveKey(null);
   };
+  /* click toggles the whole area (both sides): select on first tap, remove on second */
+  const onAreaClick = (key, side) => {
+    if (gesture.current.moved) return;
+    if (selections[key]) removeRegion(key);
+    else selectRegion(key, side);
+  };
+  const focusFromSummary = (key, side) => { setActiveKey(key); setActiveSide(selections[key]?.split ? side : "both"); };
 
   const activeRegion = activeKey ? regionByKey[activeKey] : null;
   const activeEntry = activeKey ? selections[activeKey] : null;
@@ -270,88 +311,136 @@ export default function FaceAreaSelector() {
       return { ...prev, [activeKey]: entry };
     });
   };
-
   const toggleSplit = () => {
     setSelections((prev) => {
       const entry = { ...ensureEntry(prev, activeKey) };
-      if (!entry.split) {
-        // copy "both" into each side as starting point
-        entry.split = true;
-        entry.left = { ...entry.both };
-        entry.right = { ...entry.both };
-      } else {
-        entry.split = false;
-      }
+      if (!entry.split) { entry.split = true; entry.left = { ...entry.both }; entry.right = { ...entry.both }; }
+      else entry.split = false;
       return { ...prev, [activeKey]: entry };
     });
     setActiveSide("right");
   };
-
   const toggleState = (s) => {
     const cur = sideData.states;
     patch({ states: cur.includes(s) ? cur.filter((x) => x !== s) : [...cur, s] });
   };
 
-  /* which polygons are "selected" for highlight */
-  const isPolySelected = (regionKey, side) => {
-    const e = selections[regionKey];
+  const isPolySelected = (key, side) => {
+    const e = selections[key];
     if (!e) return false;
-    if (!e.bilateral || !e.split) return true; // whole region selected
+    if (!e.bilateral || !e.split) return true;
     return e[side]?.rating > 0 || e[side]?.states.length || e[side]?.note;
   };
+  const ratingOf = (key, side) => {
+    const e = selections[key];
+    if (!e) return 0;
+    return e.split ? e[side]?.rating : e.both?.rating;
+  };
 
-  /* assemble export object */
+  function clean(side) { return { rating: side.rating || null, states: side.states, note: side.note.trim() }; }
   const intent = useMemo(() => {
     const sel = [];
     for (const [key, e] of Object.entries(selections)) {
       const r = regionByKey[key];
       const base = { region_key: key, zones: r.zones };
-      if (e.bilateral && e.split) {
-        sel.push({ ...base, split: true, sides: { left: clean(e.left), right: clean(e.right) } });
-      } else {
-        sel.push({ ...base, split: false, ...clean(e.both) });
-      }
+      if (e.bilateral && e.split) sel.push({ ...base, split: true, sides: { right: clean(e.right), left: clean(e.left) } });
+      else sel.push({ ...base, split: false, ...clean(e.both) });
     }
-    return { schema: "patient_intent_v0.1", selections: sel };
-  }, [selections, regionByKey]);
-
-  function clean(side) {
-    return { rating: side.rating || null, states: side.states, note: side.note.trim() };
-  }
-
+    const byState = selectedStates.map((st) => ({
+      state: st,
+      regions: (STATE_TO_REGIONS[st] || []).map((k) => ({ region_key: k, zones: regionByKey[k].zones })),
+    }));
+    return { schema: "patient_intent_v0.2", primary_mode: mode === "area" ? "by_area" : "by_state", by_area: sel, by_state: byState };
+  }, [selections, selectedStates, mode]);
   const exportJson = () => {
     const blob = new Blob([JSON.stringify(intent, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "patient_intent.json";
-    a.click();
+    a.href = URL.createObjectURL(blob); a.download = "patient_intent.json"; a.click();
+  };
+
+  /* ---------- zoom / pan ---------- */
+  const clampZ = (z) => Math.min(5, Math.max(1, z));
+  function zoomAt(px, py, factor) {
+    setView((v) => {
+      const z = clampZ(v.z * factor);
+      const f = z / v.z;
+      if (z === 1) return { z: 1, x: 0, y: 0 };
+      return { z, x: px - (px - v.x) * f, y: py - (py - v.y) * f };
+    });
+  }
+  const localXY = (cx, cy) => { const r = stageRef.current.getBoundingClientRect(); return { x: cx - r.left, y: cy - r.top }; };
+  const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  const onPointerDown = (e) => {
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const pl = localXY(e.clientX, e.clientY);
+    if (pointers.current.size === 1) {
+      gesture.current = { ...gesture.current, moved: false, sx: pl.x, sy: pl.y, ox: view.x, oy: view.y };
+    } else if (pointers.current.size === 2) {
+      const [a, b] = [...pointers.current.values()].map((p) => localXY(p.x, p.y));
+      gesture.current.startDist = dist(a, b);
+      gesture.current.startView = { ...view };
+      gesture.current.startCenter = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      gesture.current.moved = true;
+    }
+  };
+  const onPointerMove = (e) => {
+    if (!pointers.current.has(e.pointerId)) return;
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.current.size === 2 && gesture.current.startView) {
+      const [a, b] = [...pointers.current.values()].map((p) => localXY(p.x, p.y));
+      const nd = dist(a, b), nc = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      const sv = gesture.current.startView, sc = gesture.current.startCenter;
+      const z = clampZ(sv.z * (nd / (gesture.current.startDist || nd)));
+      const contentX = (sc.x - sv.x) / sv.z, contentY = (sc.y - sv.y) / sv.z;
+      setView(z === 1 ? { z: 1, x: 0, y: 0 } : { z, x: nc.x - contentX * z, y: nc.y - contentY * z });
+      try { stageRef.current.setPointerCapture(e.pointerId); } catch {}
+    } else if (pointers.current.size === 1) {
+      const pl = localXY(e.clientX, e.clientY);
+      const dx = pl.x - gesture.current.sx, dy = pl.y - gesture.current.sy;
+      if (Math.abs(dx) + Math.abs(dy) > 5) gesture.current.moved = true;
+      if (view.z > 1 && gesture.current.moved) {
+        setView({ z: view.z, x: gesture.current.ox + dx, y: gesture.current.oy + dy });
+        try { stageRef.current.setPointerCapture(e.pointerId); } catch {}
+      }
+    }
+  };
+  const onPointerUp = (e) => {
+    pointers.current.delete(e.pointerId);
+    try { stageRef.current.releasePointerCapture(e.pointerId); } catch {}
+    if (pointers.current.size < 2) gesture.current.startView = null;
+  };
+  const resetView = () => setView({ z: 1, x: 0, y: 0 });
+  const zoomBtn = (factor) => {
+    const r = stageRef.current.getBoundingClientRect();
+    zoomAt(r.width / 2, r.height / 2, factor);
   };
 
   const selectedCount = Object.keys(selections).length;
+  const fs = Math.max(imgDims.w, imgDims.h) || 1000;
 
   return (
     <div className="app">
       <header className="app-head">
         <span className="brand-tag">Concilium · Patient Intent</span>
-        <h1 className="app-title">איזה אזורים הכי מפריעים לך?</h1>
+        <h1 className="app-title">Which areas bother you most?</h1>
         <p className="app-sub">
-          סמני על התמונה את האזורים שהיית רוצה לטפל בהם. לכל אזור אפשר לציין כמה הוא מפריע ומה מטריד בו.
-          זו הבחירה שלך — היא תוצג לרופא לצד חוות הדעת של המערכת.
+          Tap the areas on your photo you'd like to treat. For each one you can say how much it bothers you and
+          what concerns you. This is your input — it's shown to your physician alongside the system's assessment.
         </p>
       </header>
 
       {!imgSrc && (
         <div className="upload">
-          <h2 style={{ margin: "0 0 4px", fontSize: 17 }}>העלאת תמונת חזית</h2>
-          <p>תמונת פנים חזיתית, מוארת, מבט ישר למצלמה (frontal_neutral).</p>
+          <h2>Upload a front photo</h2>
+          <p>A front-facing, well-lit photo, looking straight at the camera (frontal_neutral).</p>
           <button className="btn" disabled={loadingModel && !modelError} onClick={() => fileRef.current?.click()}>
-            {loadingModel ? "טוען מנוע זיהוי…" : "בחירת תמונה"}
+            {loadingModel ? "Loading detector…" : "Choose photo"}
           </button>
           <input ref={fileRef} type="file" accept="image/*" hidden onChange={onFile} />
           {modelError && (
             <p className="status err" style={{ marginTop: 14 }}>
-              טעינת מנוע הזיהוי נכשלה ({modelError}). ודאו חיבור רשת; בסביבת הרצה עם CSP מגביל יש להתיר את
-              storage.googleapis.com ו-cdn.jsdelivr.net.
+              Detector failed to load ({modelError}). Check your connection; on a host with a strict CSP, allow
+              storage.googleapis.com and cdn.jsdelivr.net.
             </p>
           )}
         </div>
@@ -359,61 +448,104 @@ export default function FaceAreaSelector() {
 
       {imgSrc && (
         <>
+          <div className="mode-toggle">
+            <button className={mode === "area" ? "on" : ""} onClick={() => setMode("area")}>Facial areas</button>
+            <button className={mode === "state" ? "on" : ""} onClick={() => setMode("state")}>Emotional states</button>
+          </div>
+
+          {mode === "state" && (
+            <div className="states-panel">
+              <h2>What would you like to change about how you look?</h2>
+              <p className="sub">Pick any that apply — the related areas light up on the photo below.</p>
+              <div className="state-cards">
+                {ALL_STATES.map((st) => (
+                  <button key={st} className={"state-card" + (selectedStates.includes(st) ? " on" : "")} onClick={() => toggleSelState(st)}>
+                    {STATE_LABELS[st]}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="toolbar">
-            <button className="btn-ghost btn btn-sm" onClick={() => { setImgSrc(null); setLandmarks(null); setSelections({}); setActiveKey(null); }}>
-              תמונה אחרת
+            <button className="btn btn-ghost btn-sm" onClick={() => { setImgSrc(null); setLandmarks(null); setSelections({}); setActiveKey(null); resetView(); }}>
+              Change photo
             </button>
             <label className="dbg">
               <input type="checkbox" checked={debug} onChange={(e) => setDebug(e.target.checked)} />
-              נקודות עזר (כיול)
+              Calibration points
             </label>
           </div>
 
           <div className="stage-wrap">
-            <div className="stage">
-              <img ref={imgRef} src={imgSrc} alt="תמונת המטופלת" onLoad={onImgLoad} crossOrigin="anonymous" />
-              {landmarks && imgDims.w > 0 && (
-                <svg viewBox={`0 0 ${imgDims.w} ${imgDims.h}`} preserveAspectRatio="xMidYMid meet">
-                  {polygons.map((pg) => {
-                    const sel = isPolySelected(pg.region, pg.side);
-                    const { cx, cy } = centroid(pg.pts);
-                    const e = selections[pg.region];
-                    let rating = 0;
-                    if (e) rating = e.split ? e[pg.side]?.rating : e.both?.rating;
-                    return (
-                      <g key={pg.region + pg.side}>
-                        <polygon
-                          className={"poly" + (sel ? " selected" : "")}
-                          points={toPath(pg.pts)}
-                          onClick={() => selectRegion(pg.region, pg.side)}
-                        />
-                        {sel && rating > 0 && (
-                          <>
-                            <circle className="poly-badge" cx={cx} cy={cy} r={Math.max(imgDims.w, imgDims.h) * 0.018} />
-                            <text className="poly-badge-txt" x={cx} y={cy} style={{ fontSize: Math.max(imgDims.w, imgDims.h) * 0.022 }}>
-                              {rating}
-                            </text>
-                          </>
-                        )}
+            <div
+              className="stage"
+              ref={stageRef}
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerCancel={onPointerUp}
+            >
+              <div className="stage-inner" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})` }}>
+                <img ref={imgRef} src={imgSrc} alt="patient" onLoad={onImgLoad} crossOrigin="anonymous" draggable={false} />
+                {landmarks && imgDims.w > 0 && (
+                  <svg viewBox={`0 0 ${imgDims.w} ${imgDims.h}`} preserveAspectRatio="xMidYMid meet">
+                    {polygons.map((pg) => {
+                      const sel = mode === "area" ? isPolySelected(pg.region, pg.side) : stateRegions.has(pg.region);
+                      const { cx, cy } = centroid(pg.pts);
+                      const rating = mode === "area" && sel ? ratingOf(pg.region, pg.side) : 0;
+                      return (
+                        <g key={pg.region + pg.side}>
+                          <polygon className={"poly" + (sel ? " selected" : "") + (mode === "area" ? "" : " ro")} points={toPath(pg.pts)} onClick={mode === "area" ? () => onAreaClick(pg.region, pg.side) : undefined} />
+                          {mode === "area" && sel && rating > 0 && (
+                            <>
+                              <circle className="poly-badge" cx={cx} cy={cy} r={fs * 0.018} />
+                              <text className="poly-badge-txt" x={cx} y={cy} style={{ fontSize: fs * 0.024 }}>{rating}</text>
+                            </>
+                          )}
+                        </g>
+                      );
+                    })}
+                    {externals.map((ex) => {
+                      const sel = mode === "area" ? isPolySelected(ex.region, ex.side) : stateRegions.has(ex.region);
+                      const rating = mode === "area" && sel ? ratingOf(ex.region, ex.side) : 0;
+                      const label = regionByKey[ex.region].label;
+                      const cw = fs * 0.15, chh = fs * 0.045;
+                      const rx = ex.onLeft ? ex.chip.x : ex.chip.x - cw;
+                      return (
+                        <g key={ex.region + ex.side} onClick={mode === "area" ? () => onAreaClick(ex.region, ex.side) : undefined} style={{ cursor: mode === "area" ? "pointer" : "default" }}>
+                          <line className={"lead-line" + (sel ? " on" : "")} x1={ex.ap.x} y1={ex.ap.y} x2={ex.onLeft ? rx + cw : rx} y2={ex.chip.y} />
+                          <circle className={"lead-dot" + (sel ? " on" : "")} cx={ex.ap.x} cy={ex.ap.y} r={fs * (sel ? 0.009 : 0.006)} />
+                          <rect className={"chip-rect" + (sel ? " on" : "")} x={rx} y={ex.chip.y - chh / 2} width={cw} height={chh} rx={chh / 2} />
+                          <text className={"chip-txt" + (sel ? " on" : "")} x={rx + cw / 2} y={ex.chip.y} style={{ fontSize: fs * 0.02 }}>
+                            {label}{rating ? ` · ${rating}` : ""}
+                          </text>
+                        </g>
+                      );
+                    })}
+                    {debug && landmarks.map((p, i) => (
+                      <g key={i}>
+                        <circle className="dbg-dot" cx={p.x * imgDims.w} cy={p.y * imgDims.h} r={fs * 0.0025} />
+                        <text className="dbg-num" x={p.x * imgDims.w} y={p.y * imgDims.h - fs * 0.004} style={{ fontSize: fs * 0.008 }}>{i}</text>
                       </g>
-                    );
-                  })}
-                  {debug && landmarks.map((p, i) => (
-                    <g key={i}>
-                      <circle className="dbg-dot" cx={p.x * imgDims.w} cy={p.y * imgDims.h} r={imgDims.w * 0.003} />
-                      <text className="dbg-num" x={p.x * imgDims.w} y={p.y * imgDims.h - imgDims.w * 0.004} style={{ fontSize: imgDims.w * 0.009 }}>{i}</text>
-                    </g>
-                  ))}
-                </svg>
+                    ))}
+                  </svg>
+                )}
+              </div>
+              {landmarks && (
+                <div className="zoom-ctl">
+                  <button onClick={() => zoomBtn(1.3)} aria-label="Zoom in">+</button>
+                  <button onClick={() => zoomBtn(1 / 1.3)} aria-label="Zoom out">−</button>
+                  <button className="reset" onClick={resetView} aria-label="Reset zoom">1:1</button>
+                </div>
               )}
             </div>
-            {detecting && <p className="status">מזהה נקודות פנים…</p>}
+            {detecting && <p className="status">Detecting facial points…</p>}
             {detectError && <p className="status err">{detectError}</p>}
-            {landmarks && !detectError && <p className="hint">לחצי על אזור כדי לבחור אותו</p>}
+            {landmarks && !detectError && <p className="hint">{mode === "area" ? "Tap an area to select it · pinch or scroll to zoom · tap again to remove" : "Pick concerns above · related areas light up here · pinch or scroll to zoom"}</p>}
           </div>
 
-          {/* selection panel */}
-          {activeRegion && activeEntry && (
+          {mode === "area" && activeRegion && activeEntry && (
             <div className="panel">
               <div className="panel-head">
                 <h3 className="panel-title">{activeRegion.label}</h3>
@@ -429,11 +561,11 @@ export default function FaceAreaSelector() {
               </div>
 
               <div className="field">
-                <div className="field-label">כמה זה מפריע לך?</div>
+                <div className="field-label">How much does it bother you?</div>
                 <div className="rating">
                   {[1, 2, 3].map((n) => (
                     <button key={n} className={sideData.rating === n ? "on" : ""} onClick={() => patch({ rating: n })}>
-                      {n === 1 ? "קצת" : n === 2 ? "בינוני" : "מאוד"}
+                      {n === 1 ? "A little" : n === 2 ? "Moderate" : "A lot"}
                     </button>
                   ))}
                 </div>
@@ -441,9 +573,7 @@ export default function FaceAreaSelector() {
 
               {statesForRegion(activeKey).length > 0 && (
                 <div className="field">
-                  <div className="field-label">
-                    מה מטריד אותך באזור הזה? <small>(אפשר לבחור כמה)</small>
-                  </div>
+                  <div className="field-label">What about this area concerns you? <small>(choose any)</small></div>
                   <div className="chips">
                     {statesForRegion(activeKey).map((s) => (
                       <button key={s} className={"chip" + (sideData.states.includes(s) ? " on" : "")} onClick={() => toggleState(s)}>
@@ -455,63 +585,71 @@ export default function FaceAreaSelector() {
               )}
 
               <div className="field">
-                <div className="field-label">משהו נוסף שתרצי להגיד? <small>(לא חובה)</small></div>
-                <textarea
-                  placeholder="לדוגמה: אני רוצה להיראות רעננה יותר"
-                  value={sideData.note}
-                  onChange={(e) => patch({ note: e.target.value })}
-                />
+                <div className="field-label">Anything else you'd like to add? <small>(optional)</small></div>
+                <textarea placeholder="e.g. I'd like to look more refreshed" value={sideData.note} onChange={(e) => patch({ note: e.target.value })} />
               </div>
 
               <div className="split-row">
                 {activeRegion.bilateral ? (
                   <>
-                    <span>{activeEntry.split ? "כל צד בנפרד" : "שני הצדדים יחד"}</span>
-                    <button className="btn-ghost btn btn-sm" onClick={toggleSplit}>
-                      {activeEntry.split ? "אחד את הצדדים" : "הפרד צדדים"}
+                    <span>{activeEntry.split ? "Each side separately" : "Both sides together"}</span>
+                    <button className="btn btn-ghost btn-sm" onClick={toggleSplit}>
+                      {activeEntry.split ? "Merge sides" : "Separate sides"}
                     </button>
                   </>
                 ) : <span />}
-                <button className="btn-ghost btn btn-sm" onClick={() => removeRegion(activeKey)} style={{ color: "#b3402d", borderColor: "#e0b3aa" }}>
-                  הסר אזור
+                <button className="btn btn-ghost btn-sm" onClick={() => removeRegion(activeKey)} style={{ color: "var(--danger)", borderColor: "#e0b3aa" }}>
+                  Remove
                 </button>
               </div>
             </div>
           )}
 
-          {/* summary */}
-          <div className="summary">
-            <h2>הבחירות שלך ({selectedCount})</h2>
-            {selectedCount === 0 && <p className="empty">עדיין לא נבחרו אזורים.</p>}
-            {Object.entries(selections).map(([key, e]) => {
-              const r = regionByKey[key];
-              const rows = e.split ? ["right", "left"] : ["both"];
-              return rows.map((s) => {
-                const d = e[s];
-                if (e.split && !d.rating && !d.states.length && !d.note) return null;
-                return (
-                  <div className="sum-item" key={key + s}>
-                    <div>
-                      <div className="sum-name">{r.label}{e.split ? ` · ${SIDE_LABELS[s]}` : ""}</div>
-                      <div className="sum-meta">
-                        {d.states.map((x) => STATE_LABELS[x]).join(" · ")}
-                        {d.note ? (d.states.length ? " — " : "") + d.note : ""}
-                        {!d.states.length && !d.note ? "—" : ""}
+          {mode === "area" && (
+            <div className="summary">
+              <h2>Your selections ({selectedCount})</h2>
+              {selectedCount === 0 && <p className="empty">No areas selected yet.</p>}
+              {Object.entries(selections).map(([key, e]) => {
+                const r = regionByKey[key];
+                const rows = e.split ? ["right", "left"] : ["both"];
+                return rows.map((s) => {
+                  const d = e[s];
+                  if (e.split && !d.rating && !d.states.length && !d.note) return null;
+                  return (
+                    <div className="sum-item" key={key + s} onClick={() => focusFromSummary(key, s)}>
+                      <div>
+                        <div className="sum-name">{r.label}{e.split ? ` · ${SIDE_LABELS[s]}` : ""}</div>
+                        <div className="sum-meta">
+                          {d.states.map((x) => STATE_LABELS[x]).join(" · ")}
+                          {d.note ? (d.states.length ? " — " : "") + d.note : ""}
+                          {!d.states.length && !d.note ? "—" : ""}
+                        </div>
                       </div>
+                      <div className="sum-rating">{d.rating ? `${d.rating}/3` : ""}</div>
                     </div>
-                    <div className="sum-rating">{d.rating ? `${d.rating}/3` : ""}</div>
-                  </div>
-                );
-              });
-            })}
-          </div>
+                  );
+                });
+              })}
+            </div>
+          )}
 
-          {selectedCount > 0 && (
+          {mode === "state" && (
+            <div className="summary">
+              <h2>Selected concerns ({selectedStates.length})</h2>
+              {selectedStates.length === 0 && <p className="empty">No concerns selected yet.</p>}
+              {selectedStates.map((st) => (
+                <div className="state-sum-item" key={st}>
+                  <div className="state-sum-name">{STATE_LABELS[st]}</div>
+                  <div className="state-sum-regions">{(STATE_TO_REGIONS[st] || []).map((k) => regionByKey[k].label).join(" · ") || "—"}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {(mode === "area" ? selectedCount > 0 : selectedStates.length > 0) && (
             <div className="btn-row" style={{ marginTop: 18 }}>
-              <button className="btn" onClick={exportJson}>סיום ושמירה</button>
-              <button className="btn-ghost btn" onClick={() => console.log(JSON.stringify(intent, null, 2))}>
-                הצג patient_intent (קונסול)
-              </button>
+              <button className="btn" onClick={exportJson}>Done</button>
+              <button className="btn btn-ghost" onClick={() => console.log(JSON.stringify(intent, null, 2))}>Log patient_intent</button>
             </div>
           )}
         </>
