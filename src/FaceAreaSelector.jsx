@@ -155,13 +155,14 @@ export default function FaceAreaSelector() {
   const [selections, setSelections] = useState({}); // { key: { sides: [...] } }
   const [debug, setDebug] = useState(false);
   const [view, setView] = useState({ z: 1, x: 0, y: 0 });
+  const [labelChip, setLabelChip] = useState(null); // {region, side} — shown after a click, fades after 3s
 
   const imgRef = useRef(null);
   const fileRef = useRef(null);
   const stageRef = useRef(null);
   const pointers = useRef(new Map());
   const gesture = useRef({ moved: false, sx: 0, sy: 0, ox: 0, oy: 0, startDist: 0, startView: null, startCenter: null });
-  const clickRef = useRef({ region: null, side: null, count: 0, timer: null });
+  const labelTimer = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -269,32 +270,40 @@ export default function FaceAreaSelector() {
     return out;
   }, [landmarks, imgDims]);
 
+  const labelGeom = useMemo(() => {
+    if (!labelChip || !landmarks) return null;
+    const pg = polygons.find((p) => p.region === labelChip.region && p.side === labelChip.side);
+    if (!pg) return null;
+    const { cx, cy } = centroid(pg.pts);
+    const margin = imgDims.w * 0.04;
+    const onLeft = cx < faceGeom.cx;
+    return { region: labelChip.region, side: labelChip.side, ap: { x: cx, y: cy }, onLeft, chipX: onLeft ? margin : imgDims.w - margin, chipY: cy };
+  }, [labelChip, polygons, faceGeom, imgDims]);
+
   /* ---------- selection logic ---------- */
   const isSel = (key, side) => !!selections[key]?.sides.includes(side);
+  const showLabel = (region, side) => {
+    setLabelChip({ region, side });
+    if (labelTimer.current) clearTimeout(labelTimer.current);
+    labelTimer.current = setTimeout(() => setLabelChip(null), 3000);
+  };
 
-  function applyClicks(region, side, count) {
+  const handleAreaClick = (region, side, fromPoly = true) => {
+    if (gesture.current.moved) return;
     const r = regionByKey[region];
     const all = sidesOf(r);
     setSelections((prev) => {
       const cur = new Set(prev[region]?.sides || []);
-      if (count <= 1) all.forEach((s) => cur.add(s));        // 1 click: whole area
-      else if (count === 2) cur.delete(side);                 // 2 clicks: remove clicked side
-      else all.forEach((s) => cur.delete(s));                 // 3 clicks: remove both
+      if (cur.size === 0) all.forEach((s) => cur.add(s));   // first click: select whole area
+      else if (cur.has(side)) cur.delete(side);             // click a selected side: remove just it
+      else cur.add(side);                                    // click an unselected side: add it back
       const next = { ...prev };
       const kept = all.filter((s) => cur.has(s));
       if (kept.length === 0) delete next[region];
       else next[region] = { sides: kept };
       return next;
     });
-  }
-  const handleAreaClick = (region, side) => {
-    if (gesture.current.moved) return;
-    const c = clickRef.current;
-    if (c.timer && c.region === region && c.side === side) c.count += 1;
-    else c.count = 1;
-    c.region = region; c.side = side;
-    if (c.timer) clearTimeout(c.timer);
-    c.timer = setTimeout(() => { applyClicks(region, side, c.count); c.timer = null; c.count = 0; }, 250);
+    if (fromPoly) showLabel(region, side);
   };
   const clearRegion = (key) =>
     setSelections((prev) => { const n = { ...prev }; delete n[key]; return n; });
@@ -471,7 +480,7 @@ export default function FaceAreaSelector() {
                     const cw = fs * 0.15, chh = fs * 0.045;
                     const rx = ex.onLeft ? ex.chip.x : ex.chip.x - cw;
                     return (
-                      <g key={ex.region + ex.side} onClick={() => handleAreaClick(ex.region, ex.side)} style={{ cursor: "pointer" }}>
+                      <g key={ex.region + ex.side} onClick={() => handleAreaClick(ex.region, ex.side, false)} style={{ cursor: "pointer" }}>
                         <line className={"lead-line" + (sel ? " on" : "")} x1={ex.ap.x} y1={ex.ap.y} x2={ex.onLeft ? rx + cw : rx} y2={ex.chip.y} />
                         <circle className={"lead-dot" + (sel ? " on" : "")} cx={ex.ap.x} cy={ex.ap.y} r={fs * 0.006} />
                         <rect className={"chip-rect" + (sel ? " on" : "")} x={rx} y={ex.chip.y - chh / 2} width={cw} height={chh} rx={chh / 2} />
@@ -481,6 +490,20 @@ export default function FaceAreaSelector() {
                       </g>
                     );
                   })}
+
+                  {labelGeom && (() => {
+                    const cw = fs * 0.16, chh = fs * 0.045;
+                    const rx = labelGeom.onLeft ? labelGeom.chipX : labelGeom.chipX - cw;
+                    const txt = regionByKey[labelGeom.region].label + (SIDE_LABELS[labelGeom.side] ? " · " + SIDE_LABELS[labelGeom.side] : "");
+                    return (
+                      <g onClick={() => handleAreaClick(labelGeom.region, labelGeom.side)} style={{ cursor: "pointer" }}>
+                        <line className="lead-line on" x1={labelGeom.ap.x} y1={labelGeom.ap.y} x2={labelGeom.onLeft ? rx + cw : rx} y2={labelGeom.chipY} />
+                        <circle className="lead-dot on" cx={labelGeom.ap.x} cy={labelGeom.ap.y} r={fs * 0.006} />
+                        <rect className="chip-rect on" x={rx} y={labelGeom.chipY - chh / 2} width={cw} height={chh} rx={chh / 2} />
+                        <text className="chip-text on" x={rx + cw / 2} y={labelGeom.chipY} dominantBaseline="central" textAnchor="middle" fontSize={fs * 0.02}>{txt}</text>
+                      </g>
+                    );
+                  })()}
 
                   {debug && landmarks.map((p, i) => (
                     <g key={i}>
@@ -497,7 +520,7 @@ export default function FaceAreaSelector() {
 
           {landmarks && !detectError && (
             <p className="hint">
-              Tap an area to mark both sides · tap twice to remove that side · three times to clear · pinch or scroll to zoom
+              Tap an area to mark it · tap a side again to remove just that side · pinch or scroll to zoom
             </p>
           )}
 
