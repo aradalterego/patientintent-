@@ -253,10 +253,26 @@ export default function FaceAreaSelector() {
     return out;
   }, [landmarks, imgDims, faceGeom]);
 
+  const cropBox = useMemo(() => {
+    if (!landmarks) return null;
+    const { w, h } = imgDims;
+    const xs = landmarks.map((p) => p.x * w), ys = landmarks.map((p) => p.y * h);
+    const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+    const fw = maxX - minX, fh = maxY - minY;
+    const padX = fw * 0.18, padTop = fh * 0.16, padBot = fh * 0.24; // headroom + jaw/neck, room for edge labels
+    let x = minX - padX, y = minY - padTop, bw = fw + padX * 2, bh = fh + padTop + padBot;
+    if (x < 0) { bw += x; x = 0; }
+    if (y < 0) { bh += y; y = 0; }
+    if (x + bw > w) bw = w - x;
+    if (y + bh > h) bh = h - y;
+    return { x, y, w: bw, h: bh };
+  }, [landmarks, imgDims]);
+
   const externals = useMemo(() => {
     if (!landmarks) return [];
     const { w, h } = imgDims;
-    const margin = w * 0.04;
+    const cb = cropBox || { x: 0, w };
+    const margin = cb.w * 0.05;
     const out = [];
     for (const r of EXTERNAL) {
       for (const side of ["right", "left"]) {
@@ -264,28 +280,29 @@ export default function FaceAreaSelector() {
         if (!a) continue;
         const ap = { x: a.x * w, y: a.y * h };
         const onLeft = side === "right";
-        out.push({ region: r.key, side, ap, chip: { x: onLeft ? margin : w - margin, y: ap.y }, onLeft });
+        out.push({ region: r.key, side, ap, chip: { x: onLeft ? cb.x + margin : cb.x + cb.w - margin, y: ap.y }, onLeft });
       }
     }
     return out;
-  }, [landmarks, imgDims]);
+  }, [landmarks, imgDims, cropBox]);
 
   const labelGeom = useMemo(() => {
     if (!labelChip || !landmarks) return null;
     const pg = polygons.find((p) => p.region === labelChip.region && p.side === labelChip.side);
     if (!pg) return null;
     const { cx, cy } = centroid(pg.pts);
-    const margin = imgDims.w * 0.04;
+    const cb = cropBox || { x: 0, w: imgDims.w };
+    const margin = cb.w * 0.05;
     const onLeft = cx < faceGeom.cx;
-    return { region: labelChip.region, side: labelChip.side, ap: { x: cx, y: cy }, onLeft, chipX: onLeft ? margin : imgDims.w - margin, chipY: cy };
-  }, [labelChip, polygons, faceGeom, imgDims]);
+    return { region: labelChip.region, side: labelChip.side, ap: { x: cx, y: cy }, onLeft, chipX: onLeft ? cb.x + margin : cb.x + cb.w - margin, chipY: cy };
+  }, [labelChip, polygons, faceGeom, imgDims, cropBox]);
 
   /* ---------- selection logic ---------- */
   const isSel = (key, side) => !!selections[key]?.sides.includes(side);
   const showLabel = (region, side) => {
     setLabelChip({ region, side });
     if (labelTimer.current) clearTimeout(labelTimer.current);
-    labelTimer.current = setTimeout(() => setLabelChip(null), 3000);
+    labelTimer.current = setTimeout(() => setLabelChip(null), 2000);
   };
 
   const handleAreaClick = (region, side, fromPoly = true) => {
@@ -395,7 +412,9 @@ export default function FaceAreaSelector() {
   };
 
   const selectedCount = Object.keys(selections).length;
-  const fs = Math.max(imgDims.w, imgDims.h) || 1000;
+  const fs = (cropBox ? Math.max(cropBox.w, cropBox.h) : Math.max(imgDims.w, imgDims.h)) || 1000;
+  const vb = cropBox ? `${cropBox.x.toFixed(1)} ${cropBox.y.toFixed(1)} ${cropBox.w.toFixed(1)} ${cropBox.h.toFixed(1)}` : `0 0 ${imgDims.w} ${imgDims.h}`;
+  const vbAspect = cropBox ? `${cropBox.w} / ${cropBox.h}` : (imgDims.w ? `${imgDims.w} / ${imgDims.h}` : undefined);
   const sidesLabel = (key) => {
     const v = selections[key]; if (!v) return "";
     if (v.sides.length === 1) return SIDE_LABELS[v.sides[0]] || "";
@@ -458,11 +477,12 @@ export default function FaceAreaSelector() {
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerUp}
           >
-            <div className="stage-inner" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})`, transformOrigin: "0 0" }}>
-              <img ref={imgRef} src={imgSrc} alt="patient" className="stage-img" onLoad={onImgLoad} draggable={false} />
-              {landmarks && (
-                <svg className="overlay" viewBox={`0 0 ${imgDims.w} ${imgDims.h}`} preserveAspectRatio="xMidYMid meet">
-                  {polygons.map((pg) => {
+            <div className="stage-inner" style={{ aspectRatio: vbAspect, transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})`, transformOrigin: "0 0" }}>
+              <img ref={imgRef} src={imgSrc} alt="" className="detect-img" onLoad={onImgLoad} draggable={false} />
+              {imgDims.w > 0 && (
+                <svg className="overlay-svg" viewBox={vb} preserveAspectRatio="xMidYMid meet">
+                  <image href={imgSrc} x="0" y="0" width={imgDims.w} height={imgDims.h} />
+                  {landmarks && polygons.map((pg) => {
                     const sel = isSel(pg.region, pg.side);
                     return (
                       <path
@@ -505,7 +525,7 @@ export default function FaceAreaSelector() {
                     );
                   })()}
 
-                  {debug && landmarks.map((p, i) => (
+                  {debug && landmarks && landmarks.map((p, i) => (
                     <g key={i}>
                       <circle cx={p.x * imgDims.w} cy={p.y * imgDims.h} r={fs * 0.0035} fill="#e23" opacity="0.8" />
                       <text x={p.x * imgDims.w} y={p.y * imgDims.h} fontSize={fs * 0.009} fill="#114" opacity="0.7">{i}</text>
