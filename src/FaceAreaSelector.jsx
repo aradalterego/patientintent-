@@ -155,7 +155,8 @@ export default function FaceAreaSelector() {
   const [selections, setSelections] = useState({}); // { key: { sides: [...] } }
   const [debug, setDebug] = useState(false);
   const [view, setView] = useState({ z: 1, x: 0, y: 0 });
-  const [labelChip, setLabelChip] = useState(null); // {region, side} — shown after a click, fades after 3s
+  const [labelChip, setLabelChip] = useState(null); // {region, side} — shown after a click, fades after 2s
+  const [selectedStates, setSelectedStates] = useState([]); // which state chips the clinician explicitly activated
 
   const imgRef = useRef(null);
   const fileRef = useRef(null);
@@ -195,7 +196,7 @@ export default function FaceAreaSelector() {
   }, [landmarks]);
 
   const resetAll = () => {
-    setSelections({}); setLandmarks(null); setDetectError(null); setView({ z: 1, x: 0, y: 0 });
+    setSelections({}); setSelectedStates([]); setLabelChip(null); setLandmarks(null); setDetectError(null); setView({ z: 1, x: 0, y: 0 });
   };
   const onFile = (e) => {
     const file = e.target.files?.[0];
@@ -326,13 +327,11 @@ export default function FaceAreaSelector() {
     setSelections((prev) => { const n = { ...prev }; delete n[key]; return n; });
 
   /* ---------- emotional-state chips ---------- */
-  const chipActive = useCallback(
-    (st) => STATE_TO_REGIONS[st].length > 0 && STATE_TO_REGIONS[st].every((k) => selections[k]),
-    [selections]
-  );
+  const chipActive = (st) => selectedStates.includes(st);
   const toggleStateChip = (st) => {
     const regions = STATE_TO_REGIONS[st];
-    const active = chipActive(st);
+    const active = selectedStates.includes(st);
+    setSelectedStates((prev) => (active ? prev.filter((x) => x !== st) : [...prev, st]));
     setSelections((prev) => {
       const next = { ...prev };
       regions.forEach((k) => {
@@ -346,8 +345,8 @@ export default function FaceAreaSelector() {
   const intent = useMemo(() => ({
     schema: "patient_intent_v0.3",
     areas: Object.entries(selections).map(([k, v]) => ({ region_key: k, zones: regionByKey[k].zones, sides: v.sides })),
-    states: ALL_STATES.filter((st) => STATE_TO_REGIONS[st].length > 0 && STATE_TO_REGIONS[st].every((k) => selections[k])),
-  }), [selections]);
+    states: selectedStates,
+  }), [selections, selectedStates]);
   const exportJson = () => {
     const blob = new Blob([JSON.stringify(intent, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
@@ -477,12 +476,12 @@ export default function FaceAreaSelector() {
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerUp}
           >
-            <div className="stage-inner" style={{ aspectRatio: vbAspect, transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})`, transformOrigin: "0 0" }}>
-              <img ref={imgRef} src={imgSrc} alt="" className="detect-img" onLoad={onImgLoad} draggable={false} />
-              {imgDims.w > 0 && (
+            <div className="stage-inner" style={{ aspectRatio: landmarks ? vbAspect : undefined, transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})`, transformOrigin: "0 0" }}>
+              {!landmarks && <img ref={imgRef} src={imgSrc} alt="patient" className="stage-img" onLoad={onImgLoad} draggable={false} />}
+              {landmarks && imgDims.w > 0 && (
                 <svg className="overlay-svg" viewBox={vb} preserveAspectRatio="xMidYMid meet">
                   <image href={imgSrc} x="0" y="0" width={imgDims.w} height={imgDims.h} />
-                  {landmarks && polygons.map((pg) => {
+                  {polygons.map((pg) => {
                     const sel = isSel(pg.region, pg.side);
                     return (
                       <path
