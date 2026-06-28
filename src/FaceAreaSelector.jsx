@@ -6,12 +6,15 @@ import { FaceLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
    Frontal_neutral photo + MediaPipe Face Landmarker (468 pts).
    Each perceptual region is an ORDERED polygon of canonical
    indices (calibrated on a real face). Neck has no landmarks of
-   its own — it is projected below the jaw line. region->zones is
-   translated in the backend; the perceived-state layer (zone->
-   state) is isolated and only joins at JOIN Final.
+   its own — projected below the jaw line. Lips split into two
+   vertical sides (upper / lower). region->zones is translated in
+   the backend; the perceived-state layer is isolated and joins
+   only at JOIN Final.
 
-   Calibration: all index lists live in POLY / BAND below. Toggle
-   "Calibration points" to see the 468 numbered landmarks.
+   Click model (250ms window, counts taps on one side):
+     1 click  -> select the whole area (all sides)
+     2 clicks -> remove the side you clicked
+     3 clicks -> remove the whole area (both sides)
    ============================================================ */
 
 const MODEL_URL =
@@ -22,8 +25,8 @@ const POLY = {
   forehead: [103, 67, 109, 10, 338, 297, 332, 334, 296, 9, 107, 66, 105],
   glabella: [9, 107, 55, 8, 285, 336],
   nose: [122, 48, 64, 98, 2, 326, 294, 278, 351],
-  upper_lip: [97, 167, 165, 40, 0, 270, 391, 393, 326, 2],
-  lips: [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 409, 270, 269, 267, 0, 37, 39, 40, 185],
+  lip_upper: [97, 2, 326, 426, 291, 308, 13, 78, 61, 206],
+  lip_lower: [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 308, 14, 78],
   chin: [182, 83, 18, 313, 406, 377, 152, 148, 176],
   brow_R: [70, 63, 105, 66, 107, 55, 65, 52, 53, 46],
   brow_L: [336, 296, 334, 293, 300, 276, 283, 282, 295, 285],
@@ -40,12 +43,10 @@ const BAND = {
   jaw_R: [58, 172, 136, 150, 149, 176, 148, 152],
   jaw_L: [152, 377, 400, 378, 379, 365, 397, 288],
 };
-/* convex regions (clean blob) */
 const HULL = {
   cheek_R: [116, 117, 118, 119, 120, 205, 50, 123, 187, 142],
   cheek_L: [345, 346, 347, 348, 349, 425, 280, 352, 411, 371],
 };
-/* jaw-bottom line used to project the neck region downward */
 const NECK_TOP = [132, 172, 136, 150, 149, 176, 148, 152, 377, 400, 378, 379, 365, 397, 361];
 
 const ZONE_STATES = {
@@ -63,11 +64,7 @@ const ZONE_STATES = {
   oral_commissures: ["sad", "angry", "aged", "heavy"],
   jawline: ["aged", "heavy"],
   mandibular_border: ["aged", "heavy"],
-  nose: [],
-  lateral_canthal: [],
-  chin: [],
-  neck: [],
-  platysma: [],
+  nose: [], lateral_canthal: [], chin: [], neck: [], platysma: [],
 };
 const STATE_LABELS = {
   tired: "Tired", sad: "Sad", angry: "Angry / stern", aged: "Older",
@@ -75,38 +72,35 @@ const STATE_LABELS = {
 };
 
 const REGIONS = [
-  { key: "forehead", label: "Forehead", bilateral: false, zones: ["forehead"], poly: ["forehead"] },
-  { key: "glabella", label: "Between brows", bilateral: false, zones: ["glabella"], poly: ["glabella"] },
-  { key: "brows", label: "Brows", bilateral: true, zones: ["brow_complex"], poly: ["brow_R", "brow_L"] },
-  { key: "upper_lids", label: "Upper eyelids", bilateral: true, zones: ["upper_eyelid"], poly: ["upperlid_R", "upperlid_L"] },
-  { key: "under_eye", label: "Under-eye", bilateral: true, zones: ["tear_trough", "lower_eyelid"], poly: ["undereye_R", "undereye_L"] },
-  { key: "cheeks", label: "Cheeks", bilateral: true, zones: ["malar_zygomatic", "buccal_submalar"], hull: ["cheek_R", "cheek_L"] },
-  { key: "nose", label: "Nose", bilateral: false, zones: ["nose"], poly: ["nose"] },
-  { key: "nasolabial", label: "Nasolabial folds", bilateral: true, zones: ["nasolabial"], poly: ["nasolabial_R", "nasolabial_L"] },
-  { key: "upper_lip", label: "Upper lip", bilateral: false, zones: ["lips"], poly: ["upper_lip"] },
-  { key: "lips", label: "Lips", bilateral: false, zones: ["lips"], poly: ["lips"] },
-  { key: "mouth_corners", label: "Mouth corners", bilateral: true, zones: ["oral_commissures"], poly: ["mouth_R", "mouth_L"] },
-  { key: "jawline", label: "Jawline", bilateral: true, zones: ["jawline", "mandibular_border"], band: ["jaw_R", "jaw_L"] },
-  { key: "chin", label: "Chin", bilateral: false, zones: ["chin"], poly: ["chin"] },
-  { key: "neck", label: "Neck", bilateral: false, zones: ["neck", "platysma"], neck: true },
+  { key: "forehead", label: "Forehead", axis: "single", zones: ["forehead"], poly: ["forehead"] },
+  { key: "glabella", label: "Between brows", axis: "single", zones: ["glabella"], poly: ["glabella"] },
+  { key: "brows", label: "Brows", axis: "lr", zones: ["brow_complex"], poly: ["brow_R", "brow_L"] },
+  { key: "upper_lids", label: "Upper eyelids", axis: "lr", zones: ["upper_eyelid"], poly: ["upperlid_R", "upperlid_L"] },
+  { key: "under_eye", label: "Under-eye", axis: "lr", zones: ["tear_trough", "lower_eyelid"], poly: ["undereye_R", "undereye_L"] },
+  { key: "cheeks", label: "Cheeks", axis: "lr", zones: ["malar_zygomatic", "buccal_submalar"], hull: ["cheek_R", "cheek_L"] },
+  { key: "nose", label: "Nose", axis: "single", zones: ["nose"], poly: ["nose"] },
+  { key: "nasolabial", label: "Nasolabial folds", axis: "lr", zones: ["nasolabial"], poly: ["nasolabial_R", "nasolabial_L"] },
+  { key: "lips", label: "Lips", axis: "ud", zones: ["lips"], poly: ["lip_upper", "lip_lower"] },
+  { key: "mouth_corners", label: "Mouth corners", axis: "lr", zones: ["oral_commissures"], poly: ["mouth_R", "mouth_L"] },
+  { key: "jawline", label: "Jawline", axis: "lr", zones: ["jawline", "mandibular_border"], band: ["jaw_R", "jaw_L"] },
+  { key: "chin", label: "Chin", axis: "single", zones: ["chin"], poly: ["chin"] },
+  { key: "neck", label: "Neck", axis: "single", zones: ["neck", "platysma"], neck: true },
 ];
 const EXTERNAL = [
-  { key: "temples", label: "Temples", bilateral: true, zones: ["temples"], anchor: { right: 71, left: 301 } },
-  { key: "crows_feet", label: "Crow's feet", bilateral: true, zones: ["lateral_canthal"], anchor: { right: 143, left: 372 } },
+  { key: "temples", label: "Temples", axis: "lr", zones: ["temples"], anchor: { right: 71, left: 301 } },
+  { key: "crows_feet", label: "Crow's feet", axis: "lr", zones: ["lateral_canthal"], anchor: { right: 143, left: 372 } },
 ];
-const SIDE_LABELS = { both: "Both sides", right: "Right", left: "Left" };
+const SIDE_LABELS = { both: "", right: "Right", left: "Left", upper: "Upper", lower: "Lower" };
 const ALL = [...REGIONS, ...EXTERNAL];
 const regionByKey = Object.fromEntries(ALL.map((r) => [r.key, r]));
+const sidesOf = (r) => (r.axis === "ud" ? ["upper", "lower"] : r.axis === "lr" ? ["right", "left"] : ["both"]);
 
-/* emotional states, ordered for display */
 const ALL_STATES = ["tired", "sad", "angry", "aged", "heavy", "gaunt", "stressed", "dull"];
-/* state -> perceptual regions, derived from ZONE_STATES (single source of truth) */
 const STATE_TO_REGIONS = Object.fromEntries(
   ALL_STATES.map((st) => [st, ALL.filter((r) => (r.zones || []).some((z) => (ZONE_STATES[z] || []).includes(st))).map((r) => r.key)])
 );
 
 const toPath = (pts) => pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
-/* rounded closed path through the points (keeps anchors, softens edges) */
 function smoothPath(pts, t = 0.9) {
   const n = pts.length;
   if (n < 3) return "M " + toPath(pts) + " Z";
@@ -158,19 +152,16 @@ export default function FaceAreaSelector() {
   const [detecting, setDetecting] = useState(false);
   const [detectError, setDetectError] = useState(null);
 
-  const [selections, setSelections] = useState({});
-  const [activeKey, setActiveKey] = useState(null);
-  const [activeSide, setActiveSide] = useState("both");
+  const [selections, setSelections] = useState({}); // { key: { sides: [...] } }
   const [debug, setDebug] = useState(false);
   const [view, setView] = useState({ z: 1, x: 0, y: 0 });
-  const [mode, setMode] = useState("area"); // "area" | "state"
-  const [selectedStates, setSelectedStates] = useState([]);
 
   const imgRef = useRef(null);
   const fileRef = useRef(null);
   const stageRef = useRef(null);
   const pointers = useRef(new Map());
   const gesture = useRef({ moved: false, sx: 0, sy: 0, ox: 0, oy: 0, startDist: 0, startView: null, startCenter: null });
+  const clickRef = useRef({ region: null, side: null, count: 0, timer: null });
 
   useEffect(() => {
     let cancelled = false;
@@ -189,7 +180,6 @@ export default function FaceAreaSelector() {
     return () => { cancelled = true; };
   }, []);
 
-  /* non-passive wheel zoom */
   useEffect(() => {
     const el = stageRef.current;
     if (!el) return;
@@ -203,10 +193,13 @@ export default function FaceAreaSelector() {
     return () => el.removeEventListener("wheel", onWheel);
   }, [landmarks]);
 
+  const resetAll = () => {
+    setSelections({}); setLandmarks(null); setDetectError(null); setView({ z: 1, x: 0, y: 0 });
+  };
   const onFile = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setSelections({}); setActiveKey(null); setLandmarks(null); setDetectError(null); setView({ z: 1, x: 0, y: 0 }); setSelectedStates([]);
+    resetAll();
     setImgSrc(URL.createObjectURL(file));
   };
   const onImgLoad = useCallback(() => {
@@ -243,16 +236,17 @@ export default function FaceAreaSelector() {
       }
       const keys = r.poly || r.band || r.hull;
       const isBand = !!r.band, isHull = !!r.hull;
-      if (r.bilateral) {
+      const sides = sidesOf(r);
+      if (r.axis === "single") {
+        const pts = polyPts(POLY[keys[0]], landmarks, w, h);
+        if (pts.length >= 3) out.push({ region: r.key, side: "both", pts });
+      } else {
         keys.forEach((k, i) => {
           const pts = isBand ? bandPts(BAND[k], landmarks, w, h, faceGeom.cx, faceGeom.cy)
             : isHull ? hullPts(HULL[k], landmarks, w, h)
             : polyPts(POLY[k], landmarks, w, h);
-          if (pts.length >= 3) out.push({ region: r.key, side: i === 0 ? "right" : "left", pts });
+          if (pts.length >= 3) out.push({ region: r.key, side: sides[i], pts });
         });
-      } else {
-        const pts = polyPts(POLY[keys[0]], landmarks, w, h);
-        if (pts.length >= 3) out.push({ region: r.key, side: "both", pts });
       }
     }
     return out;
@@ -275,96 +269,59 @@ export default function FaceAreaSelector() {
     return out;
   }, [landmarks, imgDims]);
 
-  const stateRegions = useMemo(() => {
-    const set = new Set();
-    selectedStates.forEach((st) => (STATE_TO_REGIONS[st] || []).forEach((k) => set.add(k)));
-    return set;
-  }, [selectedStates]);
-  const toggleSelState = (st) => setSelectedStates((prev) => (prev.includes(st) ? prev.filter((x) => x !== st) : [...prev, st]));
+  /* ---------- selection logic ---------- */
+  const isSel = (key, side) => !!selections[key]?.sides.includes(side);
 
-    const statesForRegion = useCallback((regionKey) => {
-    const r = regionByKey[regionKey];
-    if (!r) return [];
-    const set = new Set();
-    r.zones.forEach((z) => (ZONE_STATES[z] || []).forEach((s) => set.add(s)));
-    return [...set];
-  }, []);
-
-  const blankSide = () => ({ rating: 0, states: [], note: "" });
-  function ensureEntry(prev, key) {
-    if (prev[key]) return prev[key];
-    return { split: false, both: blankSide(), left: blankSide(), right: blankSide(), bilateral: regionByKey[key].bilateral };
+  function applyClicks(region, side, count) {
+    const r = regionByKey[region];
+    const all = sidesOf(r);
+    setSelections((prev) => {
+      const cur = new Set(prev[region]?.sides || []);
+      if (count <= 1) all.forEach((s) => cur.add(s));        // 1 click: whole area
+      else if (count === 2) cur.delete(side);                 // 2 clicks: remove clicked side
+      else all.forEach((s) => cur.delete(s));                 // 3 clicks: remove both
+      const next = { ...prev };
+      const kept = all.filter((s) => cur.has(s));
+      if (kept.length === 0) delete next[region];
+      else next[region] = { sides: kept };
+      return next;
+    });
   }
-  const selectRegion = (key, side) => {
-    setSelections((prev) => ({ ...prev, [key]: { ...ensureEntry(prev, key) } }));
-    setActiveKey(key);
-    setActiveSide(regionByKey[key].bilateral && selections[key]?.split ? side : "both");
-  };
-  const removeRegion = (key) => {
-    setSelections((prev) => { const n = { ...prev }; delete n[key]; return n; });
-    if (activeKey === key) setActiveKey(null);
-  };
-  /* click toggles the whole area (both sides): select on first tap, remove on second */
-  const onAreaClick = (key, side) => {
+  const handleAreaClick = (region, side) => {
     if (gesture.current.moved) return;
-    if (selections[key]) removeRegion(key);
-    else selectRegion(key, side);
+    const c = clickRef.current;
+    if (c.timer && c.region === region && c.side === side) c.count += 1;
+    else c.count = 1;
+    c.region = region; c.side = side;
+    if (c.timer) clearTimeout(c.timer);
+    c.timer = setTimeout(() => { applyClicks(region, side, c.count); c.timer = null; c.count = 0; }, 250);
   };
-  const focusFromSummary = (key, side) => { setActiveKey(key); setActiveSide(selections[key]?.split ? side : "both"); };
+  const clearRegion = (key) =>
+    setSelections((prev) => { const n = { ...prev }; delete n[key]; return n; });
 
-  const activeRegion = activeKey ? regionByKey[activeKey] : null;
-  const activeEntry = activeKey ? selections[activeKey] : null;
-  const sideKey = activeEntry?.split ? activeSide : "both";
-  const sideData = activeEntry ? activeEntry[sideKey] : null;
-
-  const patch = (changes) => {
+  /* ---------- emotional-state chips ---------- */
+  const chipActive = useCallback(
+    (st) => STATE_TO_REGIONS[st].length > 0 && STATE_TO_REGIONS[st].every((k) => selections[k]),
+    [selections]
+  );
+  const toggleStateChip = (st) => {
+    const regions = STATE_TO_REGIONS[st];
+    const active = chipActive(st);
     setSelections((prev) => {
-      const entry = { ...ensureEntry(prev, activeKey) };
-      entry[sideKey] = { ...entry[sideKey], ...changes };
-      return { ...prev, [activeKey]: entry };
+      const next = { ...prev };
+      regions.forEach((k) => {
+        if (active) delete next[k];
+        else next[k] = { sides: sidesOf(regionByKey[k]) };
+      });
+      return next;
     });
   };
-  const toggleSplit = () => {
-    setSelections((prev) => {
-      const entry = { ...ensureEntry(prev, activeKey) };
-      if (!entry.split) { entry.split = true; entry.left = { ...entry.both }; entry.right = { ...entry.both }; }
-      else entry.split = false;
-      return { ...prev, [activeKey]: entry };
-    });
-    setActiveSide("right");
-  };
-  const toggleState = (s) => {
-    const cur = sideData.states;
-    patch({ states: cur.includes(s) ? cur.filter((x) => x !== s) : [...cur, s] });
-  };
 
-  const isPolySelected = (key, side) => {
-    const e = selections[key];
-    if (!e) return false;
-    if (!e.bilateral || !e.split) return true;
-    return e[side]?.rating > 0 || e[side]?.states.length || e[side]?.note;
-  };
-  const ratingOf = (key, side) => {
-    const e = selections[key];
-    if (!e) return 0;
-    return e.split ? e[side]?.rating : e.both?.rating;
-  };
-
-  function clean(side) { return { rating: side.rating || null, states: side.states, note: side.note.trim() }; }
-  const intent = useMemo(() => {
-    const sel = [];
-    for (const [key, e] of Object.entries(selections)) {
-      const r = regionByKey[key];
-      const base = { region_key: key, zones: r.zones };
-      if (e.bilateral && e.split) sel.push({ ...base, split: true, sides: { right: clean(e.right), left: clean(e.left) } });
-      else sel.push({ ...base, split: false, ...clean(e.both) });
-    }
-    const byState = selectedStates.map((st) => ({
-      state: st,
-      regions: (STATE_TO_REGIONS[st] || []).map((k) => ({ region_key: k, zones: regionByKey[k].zones })),
-    }));
-    return { schema: "patient_intent_v0.2", primary_mode: mode === "area" ? "by_area" : "by_state", by_area: sel, by_state: byState };
-  }, [selections, selectedStates, mode]);
+  const intent = useMemo(() => ({
+    schema: "patient_intent_v0.3",
+    areas: Object.entries(selections).map(([k, v]) => ({ region_key: k, zones: regionByKey[k].zones, sides: v.sides })),
+    states: ALL_STATES.filter((st) => STATE_TO_REGIONS[st].length > 0 && STATE_TO_REGIONS[st].every((k) => selections[k])),
+  }), [selections]);
   const exportJson = () => {
     const blob = new Blob([JSON.stringify(intent, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
@@ -430,16 +387,19 @@ export default function FaceAreaSelector() {
 
   const selectedCount = Object.keys(selections).length;
   const fs = Math.max(imgDims.w, imgDims.h) || 1000;
+  const sidesLabel = (key) => {
+    const v = selections[key]; if (!v) return "";
+    if (v.sides.length === 1) return SIDE_LABELS[v.sides[0]] || "";
+    if (v.sides.includes("upper") || v.sides.includes("lower")) return "Upper + lower";
+    if (v.sides.length === 2) return "Both sides";
+    return "";
+  };
 
   return (
     <div className="app">
       <header className="app-head">
         <span className="brand-tag">Concilium · Patient Intent</span>
         <h1 className="app-title">Which areas bother you most?</h1>
-        <p className="app-sub">
-          Tap the areas on your photo you'd like to treat. For each one you can say how much it bothers you and
-          what concerns you. This is your input — it's shown to your physician alongside the system's assessment.
-        </p>
       </header>
 
       {!imgSrc && (
@@ -452,7 +412,7 @@ export default function FaceAreaSelector() {
           <input ref={fileRef} type="file" accept="image/*" hidden onChange={onFile} />
           {modelError && (
             <p className="status err" style={{ marginTop: 14 }}>
-              Detector failed to load ({modelError}). Check your connection; on a host with a strict CSP, allow
+              Detector failed to load ({modelError}). On a host with a strict CSP, allow
               storage.googleapis.com and cdn.jsdelivr.net.
             </p>
           )}
@@ -461,208 +421,103 @@ export default function FaceAreaSelector() {
 
       {imgSrc && (
         <>
-          <div className="mode-toggle">
-            <button className={mode === "area" ? "on" : ""} onClick={() => setMode("area")}>Facial areas</button>
-            <button className={mode === "state" ? "on" : ""} onClick={() => setMode("state")}>Emotional states</button>
-          </div>
-
-          {mode === "state" && (
-            <div className="states-panel">
-              <h2>What would you like to change about how you look?</h2>
-              <p className="sub">Pick any that apply — the related areas light up on the photo below.</p>
-              <div className="state-cards">
-                {ALL_STATES.map((st) => (
-                  <button key={st} className={"state-card" + (selectedStates.includes(st) ? " on" : "")} onClick={() => toggleSelState(st)}>
-                    {STATE_LABELS[st]}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="toolbar">
-            <button className="btn btn-ghost btn-sm" onClick={() => { setImgSrc(null); setLandmarks(null); setSelections({}); setActiveKey(null); resetView(); }}>
-              Change photo
-            </button>
-            <label className="dbg">
-              <input type="checkbox" checked={debug} onChange={(e) => setDebug(e.target.checked)} />
-              Calibration points
-            </label>
-          </div>
-
-          <div className="stage-wrap">
-            <div
-              className="stage"
-              ref={stageRef}
-              onPointerDown={onPointerDown}
-              onPointerMove={onPointerMove}
-              onPointerUp={onPointerUp}
-              onPointerCancel={onPointerUp}
-            >
-              <div className="stage-inner" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})` }}>
-                <img ref={imgRef} src={imgSrc} alt="patient" onLoad={onImgLoad} crossOrigin="anonymous" draggable={false} />
-                {landmarks && imgDims.w > 0 && (
-                  <svg viewBox={`0 0 ${imgDims.w} ${imgDims.h}`} preserveAspectRatio="xMidYMid meet">
-                    {polygons.map((pg) => {
-                      const sel = mode === "area" ? isPolySelected(pg.region, pg.side) : stateRegions.has(pg.region);
-                      const { cx, cy } = centroid(pg.pts);
-                      const rating = mode === "area" && sel ? ratingOf(pg.region, pg.side) : 0;
-                      return (
-                        <g key={pg.region + pg.side}>
-                          <path className={"poly" + (sel ? " selected" : "") + (mode === "area" ? "" : " ro")} d={smoothPath(pg.pts)} onClick={mode === "area" ? () => onAreaClick(pg.region, pg.side) : undefined} />
-                          {mode === "area" && sel && rating > 0 && (
-                            <>
-                              <circle className="poly-badge" cx={cx} cy={cy} r={fs * 0.018} />
-                              <text className="poly-badge-txt" x={cx} y={cy} style={{ fontSize: fs * 0.024 }}>{rating}</text>
-                            </>
-                          )}
-                        </g>
-                      );
-                    })}
-                    {externals.map((ex) => {
-                      const sel = mode === "area" ? isPolySelected(ex.region, ex.side) : stateRegions.has(ex.region);
-                      const rating = mode === "area" && sel ? ratingOf(ex.region, ex.side) : 0;
-                      const label = regionByKey[ex.region].label;
-                      const cw = fs * 0.15, chh = fs * 0.045;
-                      const rx = ex.onLeft ? ex.chip.x : ex.chip.x - cw;
-                      return (
-                        <g key={ex.region + ex.side} onClick={mode === "area" ? () => onAreaClick(ex.region, ex.side) : undefined} style={{ cursor: mode === "area" ? "pointer" : "default" }}>
-                          <line className={"lead-line" + (sel ? " on" : "")} x1={ex.ap.x} y1={ex.ap.y} x2={ex.onLeft ? rx + cw : rx} y2={ex.chip.y} />
-                          <circle className={"lead-dot" + (sel ? " on" : "")} cx={ex.ap.x} cy={ex.ap.y} r={fs * (sel ? 0.009 : 0.006)} />
-                          <rect className={"chip-rect" + (sel ? " on" : "")} x={rx} y={ex.chip.y - chh / 2} width={cw} height={chh} rx={chh / 2} />
-                          <text className={"chip-txt" + (sel ? " on" : "")} x={rx + cw / 2} y={ex.chip.y} style={{ fontSize: fs * 0.02 }}>
-                            {label}{rating ? ` · ${rating}` : ""}
-                          </text>
-                        </g>
-                      );
-                    })}
-                    {debug && landmarks.map((p, i) => (
-                      <g key={i}>
-                        <circle className="dbg-dot" cx={p.x * imgDims.w} cy={p.y * imgDims.h} r={fs * 0.0025} />
-                        <text className="dbg-num" x={p.x * imgDims.w} y={p.y * imgDims.h - fs * 0.004} style={{ fontSize: fs * 0.008 }}>{i}</text>
-                      </g>
-                    ))}
-                  </svg>
-                )}
-              </div>
-              {landmarks && (
-                <div className="zoom-ctl">
-                  <button onClick={() => zoomBtn(1.3)} aria-label="Zoom in">+</button>
-                  <button onClick={() => zoomBtn(1 / 1.3)} aria-label="Zoom out">−</button>
-                  <button className="reset" onClick={resetView} aria-label="Reset zoom">1:1</button>
-                </div>
-              )}
-            </div>
-            {detecting && <p className="status">Detecting facial points…</p>}
-            {detectError && <p className="status err">{detectError}</p>}
-            {landmarks && !detectError && <p className="hint">{mode === "area" ? "Tap an area to select it · pinch or scroll to zoom · tap again to remove" : "Pick concerns above · related areas light up here · pinch or scroll to zoom"}</p>}
-          </div>
-
-          {mode === "area" && activeRegion && activeEntry && (
-            <div className="panel">
-              <div className="panel-head">
-                <h3 className="panel-title">{activeRegion.label}</h3>
-                {activeEntry.split && (
-                  <div className="panel-side-tabs">
-                    {["right", "left"].map((s) => (
-                      <button key={s} className={"side-tab" + (activeSide === s ? " active" : "")} onClick={() => setActiveSide(s)}>
-                        {SIDE_LABELS[s]}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="field">
-                <div className="field-label">How much does it bother you?</div>
-                <div className="rating">
-                  {[1, 2, 3].map((n) => (
-                    <button key={n} className={sideData.rating === n ? "on" : ""} onClick={() => patch({ rating: n })}>
-                      {n === 1 ? "A little" : n === 2 ? "Moderate" : "A lot"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {statesForRegion(activeKey).length > 0 && (
-                <div className="field">
-                  <div className="field-label">What about this area concerns you? <small>(choose any)</small></div>
-                  <div className="chips">
-                    {statesForRegion(activeKey).map((s) => (
-                      <button key={s} className={"chip" + (sideData.states.includes(s) ? " on" : "")} onClick={() => toggleState(s)}>
-                        {STATE_LABELS[s]}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="field">
-                <div className="field-label">Anything else you'd like to add? <small>(optional)</small></div>
-                <textarea placeholder="e.g. I'd like to look more refreshed" value={sideData.note} onChange={(e) => patch({ note: e.target.value })} />
-              </div>
-
-              <div className="split-row">
-                {activeRegion.bilateral ? (
-                  <>
-                    <span>{activeEntry.split ? "Each side separately" : "Both sides together"}</span>
-                    <button className="btn btn-ghost btn-sm" onClick={toggleSplit}>
-                      {activeEntry.split ? "Merge sides" : "Separate sides"}
-                    </button>
-                  </>
-                ) : <span />}
-                <button className="btn btn-ghost btn-sm" onClick={() => removeRegion(activeKey)} style={{ color: "var(--danger)", borderColor: "#e0b3aa" }}>
-                  Remove
+          <div className="states-panel">
+            <div className="state-cards">
+              {ALL_STATES.map((st) => (
+                <button key={st} className={"state-card" + (chipActive(st) ? " on" : "")} onClick={() => toggleStateChip(st)}>
+                  {STATE_LABELS[st]}
                 </button>
-              </div>
-            </div>
-          )}
-
-          {mode === "area" && (
-            <div className="summary">
-              <h2>Your selections ({selectedCount})</h2>
-              {selectedCount === 0 && <p className="empty">No areas selected yet.</p>}
-              {Object.entries(selections).map(([key, e]) => {
-                const r = regionByKey[key];
-                const rows = e.split ? ["right", "left"] : ["both"];
-                return rows.map((s) => {
-                  const d = e[s];
-                  if (e.split && !d.rating && !d.states.length && !d.note) return null;
-                  return (
-                    <div className="sum-item" key={key + s} onClick={() => focusFromSummary(key, s)}>
-                      <div>
-                        <div className="sum-name">{r.label}{e.split ? ` · ${SIDE_LABELS[s]}` : ""}</div>
-                        <div className="sum-meta">
-                          {d.states.map((x) => STATE_LABELS[x]).join(" · ")}
-                          {d.note ? (d.states.length ? " — " : "") + d.note : ""}
-                          {!d.states.length && !d.note ? "—" : ""}
-                        </div>
-                      </div>
-                      <div className="sum-rating">{d.rating ? `${d.rating}/3` : ""}</div>
-                    </div>
-                  );
-                });
-              })}
-            </div>
-          )}
-
-          {mode === "state" && (
-            <div className="summary">
-              <h2>Selected concerns ({selectedStates.length})</h2>
-              {selectedStates.length === 0 && <p className="empty">No concerns selected yet.</p>}
-              {selectedStates.map((st) => (
-                <div className="state-sum-item" key={st}>
-                  <div className="state-sum-name">{STATE_LABELS[st]}</div>
-                  <div className="state-sum-regions">{(STATE_TO_REGIONS[st] || []).map((k) => regionByKey[k].label).join(" · ") || "—"}</div>
-                </div>
               ))}
             </div>
+          </div>
+
+          <div className="toolbar">
+            <button className="btn ghost sm" onClick={() => { resetAll(); setImgSrc(null); }}>Change photo</button>
+            <label className="chk"><input type="checkbox" checked={debug} onChange={(e) => setDebug(e.target.checked)} /> Calibration points</label>
+            <span className="spacer" />
+            <button className="btn ghost sm" onClick={() => zoomBtn(1 / 1.3)}>–</button>
+            <button className="btn ghost sm" onClick={() => zoomBtn(1.3)}>+</button>
+            {view.z > 1 && <button className="btn ghost sm" onClick={resetView}>Reset</button>}
+          </div>
+
+          <div
+            ref={stageRef}
+            className="stage"
+            style={{ touchAction: "none" }}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerUp}
+          >
+            <div className="stage-inner" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})`, transformOrigin: "0 0" }}>
+              <img ref={imgRef} src={imgSrc} alt="patient" className="stage-img" onLoad={onImgLoad} draggable={false} />
+              {landmarks && (
+                <svg className="overlay" viewBox={`0 0 ${imgDims.w} ${imgDims.h}`} preserveAspectRatio="xMidYMid meet">
+                  {polygons.map((pg) => {
+                    const sel = isSel(pg.region, pg.side);
+                    return (
+                      <path
+                        key={pg.region + pg.side}
+                        className={"poly" + (sel ? " selected" : "")}
+                        d={smoothPath(pg.pts)}
+                        onClick={() => handleAreaClick(pg.region, pg.side)}
+                      />
+                    );
+                  })}
+
+                  {externals.map((ex) => {
+                    const sel = isSel(ex.region, ex.side);
+                    const label = regionByKey[ex.region].label;
+                    const cw = fs * 0.15, chh = fs * 0.045;
+                    const rx = ex.onLeft ? ex.chip.x : ex.chip.x - cw;
+                    return (
+                      <g key={ex.region + ex.side} onClick={() => handleAreaClick(ex.region, ex.side)} style={{ cursor: "pointer" }}>
+                        <line className={"lead-line" + (sel ? " on" : "")} x1={ex.ap.x} y1={ex.ap.y} x2={ex.onLeft ? rx + cw : rx} y2={ex.chip.y} />
+                        <circle className={"lead-dot" + (sel ? " on" : "")} cx={ex.ap.x} cy={ex.ap.y} r={fs * 0.006} />
+                        <rect className={"chip-rect" + (sel ? " on" : "")} x={rx} y={ex.chip.y - chh / 2} width={cw} height={chh} rx={chh / 2} />
+                        <text className={"chip-text" + (sel ? " on" : "")} x={rx + cw / 2} y={ex.chip.y} dominantBaseline="central" textAnchor="middle" fontSize={fs * 0.02}>
+                          {label}{SIDE_LABELS[ex.side] ? " · " + SIDE_LABELS[ex.side] : ""}
+                        </text>
+                      </g>
+                    );
+                  })}
+
+                  {debug && landmarks.map((p, i) => (
+                    <g key={i}>
+                      <circle cx={p.x * imgDims.w} cy={p.y * imgDims.h} r={fs * 0.0035} fill="#e23" opacity="0.8" />
+                      <text x={p.x * imgDims.w} y={p.y * imgDims.h} fontSize={fs * 0.009} fill="#114" opacity="0.7">{i}</text>
+                    </g>
+                  ))}
+                </svg>
+              )}
+            </div>
+            {detecting && <div className="stage-status">Detecting face…</div>}
+            {detectError && <div className="stage-status err">{detectError}</div>}
+          </div>
+
+          {landmarks && !detectError && (
+            <p className="hint">
+              Tap an area to mark both sides · tap twice to remove that side · three times to clear · pinch or scroll to zoom
+            </p>
           )}
 
-          {(mode === "area" ? selectedCount > 0 : selectedStates.length > 0) && (
+          <div className="summary">
+            <h2>Selected areas ({selectedCount})</h2>
+            {selectedCount === 0 && <p className="empty">No areas selected yet. Tap a state above or an area on the photo.</p>}
+            {Object.keys(selections).map((key) => (
+              <div className="sum-item" key={key} onClick={() => clearRegion(key)}>
+                <div>
+                  <div className="sum-name">{regionByKey[key].label}</div>
+                  <div className="sum-meta">{sidesLabel(key) || "Selected"}</div>
+                </div>
+                <div className="sum-x">remove</div>
+              </div>
+            ))}
+          </div>
+
+          {selectedCount > 0 && (
             <div className="btn-row" style={{ marginTop: 18 }}>
               <button className="btn" onClick={exportJson}>Done</button>
-              <button className="btn btn-ghost" onClick={() => console.log(JSON.stringify(intent, null, 2))}>Log patient_intent</button>
             </div>
           )}
         </>

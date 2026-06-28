@@ -113,7 +113,7 @@ textarea:focus { outline: none; border-color: var(--gold-2); }
 .mode-toggle button { flex: 1; border: none; background: transparent; color: var(--ink-soft); font-size: 14px; font-weight: 600; padding: 9px; border-radius: 7px; transition: background 0.15s, color 0.15s; }
 .mode-toggle button.on { background: var(--gold); color: #fff; }
 
-.states-panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; margin-bottom: 14px; }
+.states-panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; margin-bottom: 12px; }
 .states-panel h2 { font-size: 16px; font-weight: 700; margin: 0 0 4px; }
 .states-panel .sub { font-size: 13px; color: var(--ink-soft); margin: 0 0 12px; }
 .state-cards { display: flex; flex-wrap: wrap; gap: 10px; }
@@ -125,3 +125,6 @@ textarea:focus { outline: none; border-color: var(--gold-2); }
 .state-sum-name { font-weight: 700; font-size: 14px; color: var(--gold-deep); }
 .state-sum-regions { font-size: 13px; color: var(--ink-soft); margin-top: 3px; line-height: 1.5; }
 .poly.ro { cursor: default; pointer-events: none; }
+
+.sum-x { font-size: 12px; color: var(--gold-deep); font-weight: 600; opacity: 0.8; }
+.sum-item { cursor: pointer; }
